@@ -33,11 +33,15 @@ int socket(int domain, int type, int protocol)
     int (* const next)(int, int, int) = dlsym(RTLD_NEXT, "socket");
     const int sockfd = next(domain, type, protocol);
 
-    /* Force TCP_NODELAY on all TCP sockets */
+    /* Force TCP_NODELAY and TCP_MAXSEG < 256 on all TCP sockets */
     if (sockfd >= 0 && is_tcp_socket(type, protocol)) {
-        int optval = 1;
-
+        int optval;
+        
+        optval = 1;
         setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
+        
+        optval = 256;
+        setsockopt(sockfd, IPPROTO_TCP, TCP_MAXSEG, &optval, sizeof(optval));
     }
 
     return sockfd;
@@ -47,12 +51,23 @@ int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t
 {
     int (* const next)(int, int, int, const void *, socklen_t) = dlsym(RTLD_NEXT, "setsockopt");
 
-    /* Prevent the application from removing TCP_NODELAY */
-    if (optname == TCP_NODELAY && optlen == sizeof(int)) {
-        int * const value = (int *)optval;
+    
+    if (optlen == sizeof(int)) {
+        const auto value = (int *)optval;
+        switch (optname) {
+          /* Prevent the application from removing TCP_NODELAY */
+          case TCP_NODELAY:
+            if (*value == 0) {
+                *value = 1;
+            }
+            break;
 
-        if (*value == 0) {
-            *value = 1;
+          /* Set max segment size to 256 if larger than 256 */
+          case TCP_MAXSEG:
+            if (256 < *value) {
+              *value = 256;
+            }
+            break;
         }
     }
 
